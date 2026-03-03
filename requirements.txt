@@ -1,10 +1,10 @@
-streamlit>=1.32.0,<1.40.0
-dashscope>=1.18.0
-langchain>=0.2.0,<0.3.0
-langchain-core>=0.2.0,<0.3.0
-langchain-community>=0.2.0,<0.3.0
-langchain-text-splitters>=0.2.0,<0.3.0
-chromadb>=0.5.0,<0.6.0
-python-docx>=1.1.0
-docx2txt>=0.8
-tiktoken>=0.7.0
+streamlit==1.35.0
+dashscope==1.20.0          # 必须明确版本，且放在 langchain 之前
+langchain==0.2.16
+langchain-core==0.2.38
+langchain-community==0.2.16
+langchain-text-splitters==0.2.4
+chromadb==0.5.11
+python-docx==1.1.2
+docx2txt==0.8
+tiktoken==0.7.0
