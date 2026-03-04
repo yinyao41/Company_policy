@@ -44,9 +44,9 @@ with st.sidebar:
 
 # GitHub 文档 URL 配置
 GITHUB_DOCS = {
-    "北极星制度汇编202602": "https://raw.githubusercontent.com/YOUR_USERNAME/YOUR_REPO/main/北极星制度汇编202602.docx",
-    "同登制度汇编202602_1": "https://raw.githubusercontent.com/YOUR_USERNAME/YOUR_REPO/main/同登制度汇编202602_1.docx",
-    "同登制度汇编202602_2": "https://raw.githubusercontent.com/YOUR_USERNAME/YOUR_REPO/main/同登制度汇编202602_2.docx",
+    "北极星制度汇编202602": "https://raw.githubusercontent.com/yinyao41/Company_policy/main/北极星制度汇编202602.docx",
+    "同登制度汇编202602_1": "https://raw.githubusercontent.com/yinyao41/Company_policy/同登制度汇编202602_1.docx",
+    "同登制度汇编202602_2": "https://raw.githubusercontent.com/yinyao41/Company_policy/main/同登制度汇编202602_2.docx",
 }
 
 @st.cache_data
