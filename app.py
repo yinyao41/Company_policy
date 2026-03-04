@@ -7,11 +7,11 @@ from openai import OpenAI
 import os
 
 # =============================================================================
-# 配置区（已根据你仓库实际情况填写）
+# 配置区（已适配你的仓库）
 # =============================================================================
 GITHUB_USERNAME = "yinyao41"
 GITHUB_REPO = "Company_policy"
-BRANCH = "master"   # ← 重要！你的仓库默认分支是 master
+BRANCH = "master"   # 你的默认分支
 
 # 三个制度文件的精确路径（已核实）
 POLICY_FILES = [
@@ -20,7 +20,7 @@ POLICY_FILES = [
     "data/北极星制度汇编202602.docx",
 ]
 
-# 系统提示词（严格限制模型只回答制度内容）
+# 系统提示词
 SYSTEM_PROMPT = """你是一位专业、严谨的企业制度咨询助手。
 你的全部知识仅来源于下方提供的三份制度文件，不得使用任何外部知识或编造内容。
 回答时请尽量引用原文条款、章节编号或具体表述，保持客观中立。
@@ -28,7 +28,7 @@ SYSTEM_PROMPT = """你是一位专业、严谨的企业制度咨询助手。
 “抱歉，本助手仅回答与公司制度相关的问题，请提出制度相关咨询。”"""
 
 # =============================================================================
-# 阿里通义千问（DashScope）客户端
+# 阿里通义千问客户端
 # =============================================================================
 DASHSCOPE_API_KEY = st.secrets.get("DASHSCOPE_API_KEY", os.getenv("DASHSCOPE_API_KEY"))
 
@@ -41,10 +41,10 @@ client = OpenAI(
     base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
 )
 
-MODEL_NAME = "qwen-max"   # 推荐：qwen-max / qwen-plus / qwen2.5-max
+MODEL_NAME = "qwen-max"
 
 # =============================================================================
-# 从 GitHub 下载并解析三个 Word 文件（缓存）
+# 从 GitHub 下载并解析制度文件 + 自动截断（方案一核心修改）
 # =============================================================================
 @st.cache_data(show_spinner="正在从 GitHub 下载并解析制度文件...")
 def load_policies():
@@ -69,13 +69,23 @@ def load_policies():
             continue
 
     if not documents:
-        st.error("三个制度文件全部加载失败！请确认文件已上传且仓库公开。")
+        st.error("三个制度文件全部加载失败！")
         st.stop()
 
-    return "".join(documents)
+    full_text = "".join(documents)
+    
+    # ============== 方案一核心：自动截断防超限 ==============
+    MAX_CHARS = 25000   # 安全值，确保总输入 < 30720 tokens
+    truncated = False
+    if len(full_text) > MAX_CHARS:
+        full_text = full_text[:MAX_CHARS] + "\n\n【注意：制度全文已自动截断以适配模型限制。若问题涉及未显示部分，请具体说明条款名称，我会尝试补充查询】"
+        truncated = True
+    
+    return full_text, truncated
 
 
-POLICIES_TEXT = load_policies()
+# 执行加载
+POLICIES_TEXT, WAS_TRUNCATED = load_policies()
 
 # =============================================================================
 # Streamlit 界面
@@ -83,6 +93,14 @@ POLICIES_TEXT = load_policies()
 st.set_page_config(page_title="企业制度问答助手", layout="wide")
 st.title("🏢 企业制度智能问答助手")
 st.caption("基于 GitHub 实时读取 · 通义千问驱动 · 仅限制度内容")
+
+# 侧边栏信息
+st.sidebar.success("✅ 已加载 3 份制度文件")
+st.sidebar.info(f"分支：{BRANCH} | 模型：{MODEL_NAME}")
+st.sidebar.info(f"制度总字符数: {len(POLICIES_TEXT):,}（已截断）" if WAS_TRUNCATED else f"制度总字符数: {len(POLICIES_TEXT):,}")
+
+if WAS_TRUNCATED:
+    st.sidebar.warning("⚠️ 制度内容过长，已自动截断至安全长度")
 
 # 初始化聊天历史
 if "messages" not in st.session_state:
@@ -128,5 +146,3 @@ if prompt := st.chat_input("请输入关于公司制度的问题，例如：年�
                 if "401" in str(e):
                     st.warning("API Key 无效或未设置，请检查 Streamlit Secrets")
 
-st.sidebar.success("✅ 已加载 3 份制度文件")
-st.sidebar.info(f"分支：{BRANCH} | 模型：{MODEL_NAME}")
