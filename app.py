@@ -1,180 +1,152 @@
+# -*- coding: utf-8 -*-
 import streamlit as st
 import requests
-import json
+from docx import Document
+from io import BytesIO
+from openai import OpenAI
+import os
 
-# ==================== 专属配置（已根据你的 GitHub 定制）====================
+# =============================================================================
+#  配置区（最重要三项请务必修改/确认）
+# =============================================================================
+
 GITHUB_USERNAME = "yinyao41"
 GITHUB_REPO = "Company_policy"
-GITHUB_BRANCH = "main"
-FILE_FOLDER = "data"  # 文件在 data 文件夹里
+BRANCH = "main"   # 确认你的默认分支是 main 还是 master
 
-# 文档文件名（根据截图看到的实际文件）
-DOCUMENT_FILES = [
-    "https://github.com/yinyao41/Company_policy/blob/https/github.com/yinyao41/Company_policy/data/%E5%8C%97%E6%9E%81%E6%98%9F%E5%88%B6%E5%BA%A6%E6%B1%87%E7%BC%96202602.docx",
-    "https://github.com/yinyao41/Company_policy/blob/https/github.com/yinyao41/Company_policy/data/%E5%90%8C%E6%B6%A6%E5%88%B6%E5%BA%A6%E6%B1%87%E7%BC%96202602.docx",
-    "https://github.com/yinyao41/Company_policy/blob/https/github.com/yinyao41/Company_policy/data/%E5%90%8C%E7%99%BB%E5%88%B6%E5%BA%A6%E6%B1%87%E7%BC%96202602.docx",
+# 三个制度文件的相对路径（请与 GitHub 上的实际文件名完全一致）
+POLICY_FILES = [
+    "data/同登制度汇编202602.docx",
+    "data/同润制度汇编202602.docx",
+    # 如果第三个文件名不同，请在这里修改，例如：
+    # "data/同昇制度汇编202602.docx",
+    "data/同登制度汇编202602.docx",   # ← 你描述中有重复，建议确认并修正
 ]
-# ========================================================================
 
-st.set_page_config(page_title="企业制度助手", page_icon="📚", layout="wide")
+# 系统提示词（控制大模型行为）
+SYSTEM_PROMPT = """你是一位专业、严谨、只回答公司制度相关问题的企业制度咨询助手。
+你的全部知识来源于下方提供的制度文本，不得使用任何外部知识或编造内容。
+回答时请尽量引用原文条款、章节或具体表述，并保持客观中立。
+如果问题明显与公司制度无关，请礼貌回复：
+“抱歉，本助手仅回答与公司制度相关的问题，请提出制度相关咨询。”"""
 
-st.title("📚 企业制度智能助手")
+# =============================================================================
+#  初始化大模型客户端（阿里通义千问 DashScope 兼容 OpenAI 接口）
+# =============================================================================
 
-# 从 Streamlit Secrets 获取 API Key（必须在 Streamlit Cloud 配置）
-try:
-    api_key = st.secrets["QWEN_API_KEY"]
-except:
-    st.error("❌ 请在 Streamlit Cloud 配置 API Key")
-    st.info("""
-    ### 配置步骤：
-    
-    1. 点击右上角 **⚙️ Settings**
-    2. 找到 **Secrets** 标签
-    3. 添加以下内容：
-    ```
-    QWEN_API_KEY = "sk-你的API-Key"
-    ```
-    4. 保存并重启应用
-    
-    **获取 API Key：** https://bailian.console.aliyun.com/
-    """)
+# 强烈建议通过 Streamlit Secrets 或环境变量传入，不要硬编码！
+DASHSCOPE_API_KEY = st.secrets.get("DASHSCOPE_API_KEY", os.getenv("DASHSCOPE_API_KEY"))
+
+if not DASHSCOPE_API_KEY:
+    st.error("缺少 DASHSCOPE_API_KEY。请在 Streamlit Cloud → Settings → Secrets 中添加密钥")
     st.stop()
 
-# 显示配置信息
-with st.sidebar:
-    st.success("✅ API Key 已配置")
-    st.markdown("---")
-    st.info(f"""
-    ### 📄 GitHub 配置
-    **仓库**: {GITHUB_USERNAME}/{GITHUB_REPO}  
-    **分支**: {GITHUB_BRANCH}  
-    **文件夹**: {FILE_FOLDER}/  
-    **文档**: {len(DOCUMENT_FILES)} 个
-    """)
-    
-    if st.button("🔄 重新加载文档"):
-        st.cache_data.clear()
-        st.rerun()
+client = OpenAI(
+    api_key=DASHSCOPE_API_KEY,
+    base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+)
 
-def call_qwen(api_key, question, context):
-    """调用千问 API"""
-    try:
-        response = requests.post(
-            "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",
-            headers={
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json"
-            },
-            json={
-                "model": "qwen-plus",
-                "messages": [
-                    {"role": "system", "content": "你是企业制度问答助手，请基于提供的制度文档准确回答问题。"},
-                    {"role": "user", "content": f"企业制度文档：\n{context[:6000]}\n\n用户问题：{question}\n\n请根据文档内容回答。"}
-                ],
-                "temperature": 0.7
-            },
-            timeout=30
-        )
-        if response.status_code == 200:
-            return response.json()["choices"][0]["message"]["content"]
-        else:
-            return f"❌ API 错误 ({response.status_code}): {response.text[:200]}"
-    except Exception as e:
-        return f"❌ 调用失败: {str(e)}"
+# 常用模型选项（2026年主流选择，可根据配额/效果调整）
+MODEL_NAME = "qwen-max"          # 推荐：qwen-max / qwen-plus / qwen2.5-max / qwen-turbo
 
-@st.cache_data(show_spinner=False)
-def load_docs():
-    """从 GitHub 加载文档"""
-    all_text = ""
-    success_files = []
-    failed_files = []
-    
-    # 构建基础 URL（包含 data 文件夹）
-    base_url = f"https://raw.githubusercontent.com/{GITHUB_USERNAME}/{GITHUB_REPO}/{GITHUB_BRANCH}/{FILE_FOLDER}/"
-    
-    for filename in DOCUMENT_FILES:
-        url = base_url + filename
+# =============================================================================
+#  从 GitHub 下载并解析所有制度文件 → 只执行一次并缓存
+# =============================================================================
+
+@st.cache_data(show_spinner="正在从 GitHub 下载并解析制度文件...")
+def load_policies():
+    documents = []
+
+    for rel_path in POLICY_FILES:
+        url = f"https://raw.githubusercontent.com/{GITHUB_USERNAME}/{GITHUB_REPO}/{BRANCH}/{rel_path}"
         
-        with st.spinner(f"正在加载 {filename}..."):
-            try:
-                response = requests.get(url, timeout=10)
+        try:
+            r = requests.get(url, timeout=12)
+            r.raise_for_status()
+            
+            doc = Document(BytesIO(r.content))
+            text = "\n".join(p.text.strip() for p in doc.paragraphs if p.text.strip())
+            
+            if text:
+                # 显示用文件名（去掉 data/ 前缀和 .docx）
+                display_name = rel_path.split("/")[-1].replace(".docx", "")
+                documents.append(f"【{display_name}】\n{text}\n{'─'*60}\n")
+            else:
+                st.warning(f"文件内容为空：{rel_path}")
                 
-                if response.status_code == 200:
-                    # 处理 Word 文档
-                    from docx import Document
-                    import io
-                    doc = Document(io.BytesIO(response.content))
-                    text = "\n".join([p.text for p in doc.paragraphs if p.text.strip()])
-                    
-                    all_text += f"\n\n{'='*50}\n文档：{filename}\n{'='*50}\n{text}"
-                    success_files.append(filename)
-                    st.success(f"✅ {filename}")
-                else:
-                    failed_files.append((filename, f"HTTP {response.status_code}"))
-                    st.error(f"❌ {filename} - 错误 {response.status_code}")
-                    
+        except Exception as e:
+            st.error(f"无法读取文件 {rel_path}\n错误：{str(e)}")
+            continue
+
+    if not documents:
+        st.error("所有制度文件加载失败，无法继续运行。请检查 GitHub 文件是否存在且可公开访问。")
+        st.stop()
+
+    full_text = "".join(documents)
+    
+    # 如果文本非常非常长，可以在这里简单截断（视模型上下文窗口而定）
+    # full_text = full_text[:320000]   # 约 qwen-max 支持的 80% 容量，视情况开启
+    
+    return full_text
+
+
+# 加载制度内容（缓存机制，部署后只加载一次）
+POLICIES_TEXT = load_policies()
+
+
+# =============================================================================
+#               Streamlit 聊天界面
+# =============================================================================
+
+st.set_page_config(page_title="企业制度问答助手", layout="wide")
+
+st.title("企业制度智能问答")
+st.caption("基于 GitHub 上传的制度汇编文件 · 由通义千问驱动")
+
+# 初始化会话历史
+if "messages" not in st.session_state:
+    st.session_state.messages = [
+        {"role": "system", "content": SYSTEM_PROMPT + "\n\n以下是完整的制度文本（请严格依据此内容回答）：\n\n" + POLICIES_TEXT}
+    ]
+
+# 显示历史对话
+for message in st.session_state.messages[1:]:  # 跳过 system prompt
+    with st.chat_message(message["role"]):
+        st.markdown(message["content"])
+
+# 用户输入框
+if user_input := st.chat_input("请输入关于公司制度的问题..."):
+    
+    st.session_state.messages.append({"role": "user", "content": user_input})
+    
+    with st.chat_message("user"):
+        st.markdown(user_input)
+
+    with st.chat_message("assistant"):
+        with st.spinner("正在查询制度内容..."):
+            try:
+                stream = client.chat.completions.create(
+                    model=MODEL_NAME,
+                    messages=st.session_state.messages,
+                    temperature=0.25,
+                    max_tokens=1800,
+                    stream=True
+                )
+                
+                response_container = st.empty()
+                full_response = ""
+                
+                for chunk in stream:
+                    if chunk.choices[0].delta.content is not None:
+                        full_response += chunk.choices[0].delta.content
+                        response_container.markdown(full_response + "▌")
+                
+                response_container.markdown(full_response)
+                
+                st.session_state.messages.append({"role": "assistant", "content": full_response})
+                
             except Exception as e:
-                failed_files.append((filename, str(e)))
-                st.error(f"❌ {filename} - {str(e)}")
-    
-    # 显示加载结果
-    if success_files:
-        st.success(f"📄 成功加载 {len(success_files)}/{len(DOCUMENT_FILES)} 个文档")
-    
-    if failed_files:
-        st.warning("⚠️ 部分文件加载失败，但可以继续使用已加载的文档")
-    
-    return all_text, success_files
-
-# 主界面
-st.markdown("### 📚 正在加载文档...")
-docs, success_files = load_docs()
-
-if len(docs) > 100 and success_files:
-    st.success(f"✅ 准备就绪！已加载 {len(success_files)} 个制度文档")
-    
-    # 聊天界面
-    if "msgs" not in st.session_state:
-        st.session_state.msgs = []
-    
-    # 显示历史消息
-    for msg in st.session_state.msgs:
-        with st.chat_message(msg["role"]):
-            st.write(msg["content"])
-    
-    # 用户输入
-    if prompt := st.chat_input("请输入关于企业制度的问题..."):
-        # 用户消息
-        st.session_state.msgs.append({"role": "user", "content": prompt})
-        with st.chat_message("user"):
-            st.write(prompt)
-        
-        # AI 回复
-        with st.chat_message("assistant"):
-            with st.spinner("正在思考..."):
-                reply = call_qwen(api_key, prompt, docs)
-                st.write(reply)
-        
-        st.session_state.msgs.append({"role": "assistant", "content": reply})
-    
-    # 底部按钮
-    if st.button("🗑️ 清空对话历史"):
-        st.session_state.msgs = []
-        st.rerun()
-
-else:
-    st.error("❌ 文档加载失败")
-    st.info("""
-    ### 可能的原因：
-    1. 网络连接问题
-    2. GitHub 访问受限
-    3. 文件格式问题
-    
-    请稍后重试或检查文件配置
-    """)
-
-# 页脚
-st.markdown("---")
-st.caption("企业制度智能助手 | Powered by 阿里云千问 & Streamlit")
-
+                st.error(f"模型调用失败：{str(e)}")
+                if "401" in str(e) or "invalid api key" in str(e).lower():
+                    st.warning("API Key 可能无效或已过期，请检查 Streamlit Secrets 设置")
 
