@@ -10,9 +10,9 @@ FILE_FOLDER = "data"  # 文件在 data 文件夹里
 
 # 文档文件名（根据截图看到的实际文件）
 DOCUMENT_FILES = [
-    "北极星制度汇编202602.docx",
-    "同润制度汇编202602.docx",
-    "同登制度汇编202602.docx",
+    "https://github.com/yinyao41/Company_policy/blob/https/github.com/yinyao41/Company_policy/data/%E5%8C%97%E6%9E%81%E6%98%9F%E5%88%B6%E5%BA%A6%E6%B1%87%E7%BC%96202602.docx",
+    "https://github.com/yinyao41/Company_policy/blob/https/github.com/yinyao41/Company_policy/data/%E5%90%8C%E6%B6%A6%E5%88%B6%E5%BA%A6%E6%B1%87%E7%BC%96202602.docx",
+    "https://github.com/yinyao41/Company_policy/blob/https/github.com/yinyao41/Company_policy/data/%E5%90%8C%E7%99%BB%E5%88%B6%E5%BA%A6%E6%B1%87%E7%BC%96202602.docx",
 ]
 # ========================================================================
 
