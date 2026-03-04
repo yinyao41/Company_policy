@@ -95,5 +95,44 @@ st.title("🏢 企业制度智能问答助手")
 if "messages" not in st.session_state:
     st.session_state.messages = [{
         "role": "system",
+        "content": SYSTEM_PROMPT + "\n\n以下是公司全部制度文本（请严格依据此内容回答）：\n\n" + POLICIES_TEXT
+    }]
+
+# 显示历史消息
+for msg in st.session_state.messages[1:]:
+    with st.chat_message(msg["role"]):
+        st.markdown(msg["content"])
+
+# 用户输入
+if prompt := st.chat_input("请输入关于公司制度的问题，例如：年假如何计算？"):
+    st.session_state.messages.append({"role": "user", "content": prompt})
+    with st.chat_message("user"):
+        st.markdown(prompt)
+
+    with st.chat_message("assistant"):
+        with st.spinner("正在查询制度原文..."):
+            try:
+                stream = client.chat.completions.create(
+                    model=MODEL_NAME,
+                    messages=st.session_state.messages,
+                    temperature=0.25,
+                    max_tokens=2000,
+                    stream=True
+                )
+                
+                response_container = st.empty()
+                full_response = ""
+                for chunk in stream:
+                    if chunk.choices[0].delta.content:
+                        full_response += chunk.choices[0].delta.content
+                        response_container.markdown(full_response + "▌")
+                
+                response_container.markdown(full_response)
+                st.session_state.messages.append({"role": "assistant", "content": full_response})
+                
+            except Exception as e:
+                st.error(f"模型调用失败：{str(e)}")
+                if "401" in str(e):
+                    st.warning("API Key 无效或未设置，请检查 Streamlit Secrets")
        
 
