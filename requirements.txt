@@ -1,10 +1,4 @@
-streamlit==1.35.0
-dashscope==1.20.0          # 必须明确版本，且放在 langchain 之前
-langchain==0.2.16
-langchain-core==0.2.38
-langchain-community==0.2.16
-langchain-text-splitters==0.2.4
-chromadb==0.5.11
-python-docx==1.1.2
-docx2txt==0.8
-tiktoken==0.7.0
+streamlit==1.31.0
+python-docx==1.1.0
+requests==2.31.0
+openai==1.12.0
