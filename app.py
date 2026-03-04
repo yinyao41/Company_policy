@@ -1,172 +1,153 @@
-# app.py —— 所有逻辑放在一个文件里，极简且兼容 2026 年 Streamlit Cloud 版本
-
 import streamlit as st
+import requests
+from docx import Document
+import io
 import os
-from langchain_community.document_loaders import Docx2txtLoader
-from langchain_text_splitters import RecursiveCharacterTextSplitter   # 修正：使用新路径
-from langchain_community.embeddings import DashScopeEmbeddings
-from langchain_community.vectorstores import Chroma
-from langchain_community.chat_models import ChatDashScope
-from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.runnables import RunnablePassthrough
-from langchain_core.output_parsers import StrOutputParser
+from openai import OpenAI
 
-# ────────────────────────────────────────────────
-# 配置（可根据需要微调）
-# ────────────────────────────────────────────────
-DATA_DIR = "data"
-CHUNK_SIZE = 800
-CHUNK_OVERLAP = 120
-EMBEDDING_MODEL = "text-embedding-v2"
-LLM_MODEL = "qwen-max"           # 可改为 qwen-plus 或 qwen-turbo 降低成本
-RETRIEVER_K = 6
+# 页面配置
+st.set_page_config(
+    page_title="企业制度智能助手",
+    page_icon="📚",
+    layout="wide"
+)
 
-# ────────────────────────────────────────────────
-# 文档加载与切分
-# ────────────────────────────────────────────────
-@st.cache_resource(show_spinner="正在读取制度文档...")
-def load_documents():
-    if not os.path.exists(DATA_DIR):
-        st.error(f"目录 '{DATA_DIR}' 不存在，请确认仓库中包含 data/ 文件夹和 .docx 文件")
-        st.stop()
+# 标题
+st.title("📚 企业制度智能助手")
+st.markdown("基于阿里云千问的企业制度文档问答系统")
 
-    docs = []
-    splitter = RecursiveCharacterTextSplitter(
-        chunk_size=CHUNK_SIZE,
-        chunk_overlap=CHUNK_OVERLAP,
-        separators=["\n\n", "\n", "。", "！", "？", "；", "，", " ", ""]
+# 侧边栏配置
+with st.sidebar:
+    st.header("⚙️ 配置")
+    
+    # API Key 输入
+    api_key = st.text_input(
+        "阿里云千问 API Key",
+        type="password",
+        help="请输入您的阿里云千问 API Key"
     )
+    
+    st.markdown("---")
+    st.markdown("### 📄 已加载的制度文档")
+    st.markdown("""
+    - 北极星制度汇编202602
+    - 同登制度汇编202602 (2份)
+    """)
+    
+    st.markdown("---")
+    st.markdown("### 💡 使用提示")
+    st.markdown("""
+    1. 输入阿里云千问 API Key
+    2. 在下方输入您的问题
+    3. 系统会基于企业制度文档回答
+    """)
 
-    found_files = False
-    for filename in os.listdir(DATA_DIR):
-        if filename.lower().endswith(".docx"):
-            found_files = True
-            path = os.path.join(DATA_DIR, filename)
-            try:
-                loader = Docx2txtLoader(path)
-                raw = loader.load()
-                split = splitter.split_documents(raw)
-                for d in split:
-                    d.metadata["source_file"] = filename
-                docs.extend(split)
-            except Exception as e:
-                st.warning(f"加载文件 {filename} 失败：{str(e)}")
+# GitHub 文档 URL 配置
+GITHUB_DOCS = {
+    "北极星制度汇编202602": "https://raw.githubusercontent.com/YOUR_USERNAME/YOUR_REPO/main/北极星制度汇编202602.docx",
+    "同登制度汇编202602_1": "https://raw.githubusercontent.com/YOUR_USERNAME/YOUR_REPO/main/同登制度汇编202602_1.docx",
+    "同登制度汇编202602_2": "https://raw.githubusercontent.com/YOUR_USERNAME/YOUR_REPO/main/同登制度汇编202602_2.docx",
+}
 
-    if not found_files:
-        st.error("data/ 目录下没有找到任何 .docx 文件")
-        st.stop()
-    if not docs:
-        st.error("所有 .docx 文件内容为空或解析失败")
-        st.stop()
-
-    return docs
-
-# ────────────────────────────────────────────────
-# 向量数据库
-# ────────────────────────────────────────────────
-@st.cache_resource(show_spinner="正在构建/加载向量数据库...")
-def get_vectorstore(docs):
-    try:
-        embeddings = DashScopeEmbeddings(model=EMBEDDING_MODEL)
-        vectorstore = Chroma.from_documents(
-            documents=docs,
-            embedding=embeddings,
-            collection_name="policy_rag_collection"
-        )
-        return vectorstore
-    except Exception as e:
-        st.error(f"向量数据库创建失败：{str(e)}\n可能原因：DashScope API Key 无效或网络问题")
-        st.stop()
-
-# ────────────────────────────────────────────────
-# RAG 链
-# ────────────────────────────────────────────────
-@st.cache_resource
-def create_rag_chain(retriever):
-    llm = ChatDashScope(
-        model=LLM_MODEL,
-        temperature=0.3,
-        streaming=True
-    )
-
-    prompt = ChatPromptTemplate.from_messages([
-        ("system", """你是一位严格的企业制度培训助手。
-只能基于下面检索到的制度条款内容回答问题。
-请尽量引用条款编号、标题或原文关键句。
-如果问题与三份制度汇编无关，或检索内容不足以回答，
-请回复：“此问题超出当前制度培训知识库范围，请咨询人力资源部或相关负责人。”
-
-已检索内容：
-{context}
-
-当前问题：{question}"""),
-        ("human", "{question}")
-    ])
-
-    def format_docs(docs):
-        return "\n\n".join(
-            f"【来源：{d.metadata.get('source_file', '未知文件')}】\n{d.page_content.strip()}"
-            for d in docs
-        )
-
-    chain = (
-        {"context": retriever | format_docs, "question": RunnablePassthrough()}
-        | prompt
-        | llm
-        | StrOutputParser()
-    )
-    return chain
-
-# ────────────────────────────────────────────────
-# 主界面
-# ────────────────────────────────────────────────
-st.title("企业制度学习助手")
-st.caption("基于《同润制度汇编202602》、《同登制度汇编202602》、《北极星制度汇编202602》")
-
-# 初始化（只执行一次）
-if "rag_chain" not in st.session_state:
-    with st.spinner("首次加载知识库（需要 1–3 分钟，请耐心等待）..."):
+@st.cache_data
+def load_documents_from_github():
+    """从 GitHub 加载 Word 文档"""
+    all_text = ""
+    
+    for doc_name, url in GITHUB_DOCS.items():
         try:
-            docs = load_documents()
-            vectorstore = get_vectorstore(docs)
-            retriever = vectorstore.as_retriever(search_kwargs={"k": RETRIEVER_K})
-            st.session_state.rag_chain = create_rag_chain(retriever)
-            st.session_state.retriever = retriever
-            st.success("知识库加载完成，可以开始提问")
+            response = requests.get(url)
+            if response.status_code == 200:
+                doc = Document(io.BytesIO(response.content))
+                text = "\n".join([paragraph.text for paragraph in doc.paragraphs if paragraph.text.strip()])
+                all_text += f"\n\n=== {doc_name} ===\n{text}"
+            else:
+                st.warning(f"无法加载 {doc_name}")
         except Exception as e:
-            st.error(f"知识库初始化失败：{str(e)}")
-            st.stop()
+            st.error(f"加载 {doc_name} 时出错: {str(e)}")
+    
+    return all_text
 
-# 聊天历史显示
-if "messages" not in st.session_state:
-    st.session_state.messages = []
+def query_qwen(api_key, question, context):
+    """调用阿里云千问 API"""
+    try:
+        client = OpenAI(
+            api_key=api_key,
+            base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+        )
+        
+        # 构建提示词
+        prompt = f"""你是一个企业制度问答助手。请基于以下企业制度文档内容回答用户问题。
+        
+企业制度文档内容：
+{context[:8000]}  # 限制上下文长度
 
-for msg in st.session_state.messages:
-    with st.chat_message(msg["role"]):
-        st.markdown(msg["content"])
+用户问题：{question}
 
-# 用户输入
-if question := st.chat_input("请输入制度相关问题，例如：年假怎么计算？"):
-    st.session_state.messages.append({"role": "user", "content": question})
-    with st.chat_message("user"):
-        st.markdown(question)
+请提供准确、专业的回答，如果文档中没有相关信息，请明确说明。"""
 
-    with st.chat_message("assistant"):
-        with st.spinner("查询中..."):
-            try:
-                answer = st.session_state.rag_chain.invoke(question)
-                st.markdown(answer)
+        completion = client.chat.completions.create(
+            model="qwen-plus",
+            messages=[
+                {"role": "system", "content": "你是一个专业的企业制度问答助手，擅长解读和解释企业规章制度。"},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.7,
+            max_tokens=1500
+        )
+        
+        return completion.choices[0].message.content
+    
+    except Exception as e:
+        return f"API 调用错误: {str(e)}"
 
-                # 简单推荐功能：显示 Top-3 相关片段
-                relevant_docs = st.session_state.retriever.invoke(question)
-                if relevant_docs:
-                    st.markdown("**相关制度片段参考：**")
-                    for i, doc in enumerate(relevant_docs[:3], 1):
-                        src = doc.metadata.get("source_file", "未知文件")
-                        preview = doc.page_content[:180].replace("\n", " ").strip() + "..."
-                        st.markdown(f"{i}. **{src}** · {preview}")
-            except Exception as e:
-                st.error(f"生成回答失败：{str(e)}")
+# 主界面
+if not api_key:
+    st.warning("⚠️ 请在左侧输入阿里云千问 API Key")
+else:
+    # 加载文档
+    with st.spinner("正在加载企业制度文档..."):
+        documents_content = load_documents_from_github()
+    
+    if documents_content:
+        st.success("✅ 文档加载成功！")
+        
+        # 初始化聊天历史
+        if "messages" not in st.session_state:
+            st.session_state.messages = []
+        
+        # 显示聊天历史
+        for message in st.session_state.messages:
+            with st.chat_message(message["role"]):
+                st.markdown(message["content"])
+        
+        # 用户输入
+        if question := st.chat_input("请输入您关于企业制度的问题..."):
+            # 添加用户消息
+            st.session_state.messages.append({"role": "user", "content": question})
+            with st.chat_message("user"):
+                st.markdown(question)
+            
+            # 获取回答
+            with st.chat_message("assistant"):
+                with st.spinner("正在思考..."):
+                    response = query_qwen(api_key, question, documents_content)
+                    st.markdown(response)
+            
+            # 添加助手消息
+            st.session_state.messages.append({"role": "assistant", "content": response})
+        
+        # 清除对话按钮
+        if st.button("🗑️ 清除对话历史"):
+            st.session_state.messages = []
+            st.rerun()
+    else:
+        st.error("❌ 无法加载文档，请检查 GitHub 仓库配置")
 
-    # 保存回答到历史
-    st.session_state.messages.append({"role": "assistant", "content": answer})
+# 页脚
+st.markdown("---")
+st.markdown("""
+<div style='text-align: center; color: gray;'>
+    <small>企业制度智能助手 | 基于阿里云千问 | Powered by Streamlit</small>
+</div>
+""", unsafe_allow_html=True)
