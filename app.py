@@ -11,9 +11,9 @@ import os
 # =============================================================================
 GITHUB_USERNAME = "yinyao41"
 GITHUB_REPO = "Company_policy"
-BRANCH = "master"   # 你的默认分支
+BRANCH = "master"
 
-# 三个制度文件的精确路径（已核实）
+# 三个制度文件的精确路径
 POLICY_FILES = [
     "data/同登制度汇编202602.docx",
     "data/同润制度汇编202602.docx",
@@ -44,7 +44,7 @@ client = OpenAI(
 MODEL_NAME = "qwen-max"
 
 # =============================================================================
-# 从 GitHub 下载并解析制度文件 + 自动截断（方案一核心修改）
+# 从 GitHub 下载并解析制度文件 + 后台自动截断（不显示任何提醒）
 # =============================================================================
 @st.cache_data(show_spinner="正在从 GitHub 下载并解析制度文件...")
 def load_policies():
@@ -74,75 +74,26 @@ def load_policies():
 
     full_text = "".join(documents)
     
-    # ============== 方案一核心：自动截断防超限 ==============
-    MAX_CHARS = 25000   # 安全值，确保总输入 < 30720 tokens
-    truncated = False
+    # 后台自动截断（不显示任何提醒）
+    MAX_CHARS = 25000
     if len(full_text) > MAX_CHARS:
-        full_text = full_text[:MAX_CHARS] + "\n\n【注意：制度全文已自动截断以适配模型限制。若问题涉及未显示部分，请具体说明条款名称，我会尝试补充查询】"
-        truncated = True
+        full_text = full_text[:MAX_CHARS] + "\n\n【注意：制度全文已自动截断。若问题涉及未显示部分，请具体说明条款名称】"
     
-    return full_text, truncated
+    return full_text
 
 
-# 执行加载
-POLICIES_TEXT, WAS_TRUNCATED = load_policies()
+# 执行加载（只返回文本）
+POLICIES_TEXT = load_policies()
 
 # =============================================================================
-# Streamlit 界面
+# Streamlit 界面（只剩主标题 + 聊天框）
 # =============================================================================
 st.set_page_config(page_title="企业制度问答助手", layout="wide")
 st.title("🏢 企业制度智能问答助手")
-st.caption("基于 GitHub 实时读取 · 通义千问驱动 · 仅限制度内容")
-
-# 侧边栏信息
-st.sidebar.success("✅ 已加载 3 份制度文件")
-st.sidebar.info(f"分支：{BRANCH} | 模型：{MODEL_NAME}")
-st.sidebar.info(f"制度总字符数: {len(POLICIES_TEXT):,}（已截断）" if WAS_TRUNCATED else f"制度总字符数: {len(POLICIES_TEXT):,}")
-
-if WAS_TRUNCATED:
-    st.sidebar.warning("⚠️ 制度内容过长，已自动截断至安全长度")
 
 # 初始化聊天历史
 if "messages" not in st.session_state:
     st.session_state.messages = [{
         "role": "system",
-        "content": SYSTEM_PROMPT + "\n\n以下是公司全部制度文本（请严格依据此内容回答）：\n\n" + POLICIES_TEXT
-    }]
-
-# 显示历史消息
-for msg in st.session_state.messages[1:]:
-    with st.chat_message(msg["role"]):
-        st.markdown(msg["content"])
-
-# 用户输入
-if prompt := st.chat_input("请输入关于公司制度的问题，例如：年假如何计算？"):
-    st.session_state.messages.append({"role": "user", "content": prompt})
-    with st.chat_message("user"):
-        st.markdown(prompt)
-
-    with st.chat_message("assistant"):
-        with st.spinner("正在查询制度原文..."):
-            try:
-                stream = client.chat.completions.create(
-                    model=MODEL_NAME,
-                    messages=st.session_state.messages,
-                    temperature=0.25,
-                    max_tokens=2000,
-                    stream=True
-                )
-                
-                response_container = st.empty()
-                full_response = ""
-                for chunk in stream:
-                    if chunk.choices[0].delta.content:
-                        full_response += chunk.choices[0].delta.content
-                        response_container.markdown(full_response + "▌")
-                
-                response_container.markdown(full_response)
-                st.session_state.messages.append({"role": "assistant", "content": full_response})
-                
-            except Exception as e:
-                st.error(f"模型调用失败：{str(e)}")
-                if "401" in str(e):
-                    st.warning("API Key 无效或未设置，请检查 Streamlit Secrets")
+       
 
